@@ -1,0 +1,40 @@
+name: Sync to SharePoint (OneDrive Method)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'index.html'
+      - 'README.md'
+
+jobs:
+  sync-to-onedrive:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install office365-python requests
+
+      - name: Sync files to SharePoint
+        env:
+          SHAREPOINT_EMAIL: ${{ secrets.SHAREPOINT_EMAIL }}
+          SHAREPOINT_PASSWORD: ${{ secrets.SHAREPOINT_PASSWORD }}
+        run: |
+          python scripts/sync_to_sharepoint.py
+
+      - name: Log sync completion
+        run: |
+          echo "✅ Arquivo sincronizado com SharePoint!"
+          echo "Data: $(date)"
+          echo "Arquivo: index.html"
+          echo "Destino: SharePoint - Guia de Informações - COA Relatórios"
