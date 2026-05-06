@@ -28,7 +28,7 @@ jobs:
       - name: Sync files to SharePoint
         env:
           SHAREPOINT_EMAIL: ${{ secrets.SHAREPOINT_EMAIL }}
-          SHAREPOINT_PASSWORD: ${{ secrets.SHAREPOINT_PASSWORD }}
+          SHAREPOINT_APP_PASSWORD: ${{ secrets.SHAREPOINT_APP_PASSWORD }}
         run: |
           python scripts/sync_to_sharepoint.py
 
