@@ -23,7 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install office365-python requests
+          pip install requests python-dotenv
 
       - name: Sync files to SharePoint
         env:
