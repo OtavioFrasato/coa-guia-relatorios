@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Sincronizador GitHub → SharePoint via Microsoft Graph API
-Usa autenticação com email/senha (Client Credentials Flow)
+Sincronizador GitHub → SharePoint via OneDrive API
+Usa App Password (mais seguro que senha simples)
 """
 
 import os
 import sys
 import requests
-import json
+import base64
 from pathlib import Path
 
 # ============================================================================
@@ -15,11 +15,7 @@ from pathlib import Path
 # ============================================================================
 
 EMAIL = os.environ.get('SHAREPOINT_EMAIL')
-PASSWORD = os.environ.get('SHAREPOINT_PASSWORD')
-
-# Credenciais da aplicação (usando Office App ID padrão)
-CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
-TENANT = "common"
+APP_PASSWORD = os.environ.get('SHAREPOINT_APP_PASSWORD')
 
 # SharePoint
 SHAREPOINT_SITE = "tereos.sharepoint.com"
@@ -42,39 +38,9 @@ def log(msg, level="INFO"):
     }
     print(f"{icons.get(level, '•')} {msg}")
 
-def get_access_token():
-    """Obtém token via ROPC (Resource Owner Password Credentials Flow)"""
-    log("Autenticando com Microsoft...", "SYNC")
-    
-    url = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token"
-    
-    data = {
-        'grant_type': 'password',
-        'client_id': CLIENT_ID,
-        'scope': 'https://graph.microsoft.com/.default',
-        'username': EMAIL,
-        'password': PASSWORD,
-    }
-    
-    try:
-        response = requests.post(url, data=data, timeout=10)
-        response.raise_for_status()
-        
-        token = response.json().get('access_token')
-        if not token:
-            log(f"Sem token na resposta: {response.json()}", "ERROR")
-            return None
-        
-        log("Autenticação bem-sucedida!", "SUCCESS")
-        return token
-        
-    except requests.exceptions.RequestException as e:
-        log(f"Erro na autenticação: {e}", "ERROR")
-        return None
-
-def upload_file_simple(token):
-    """Upload direto via Microsoft Graph"""
-    log(f"Fazendo upload de '{FILE_TO_UPLOAD}'...", "SYNC")
+def upload_via_webdav():
+    """Upload via WebDAV (mais confiável)"""
+    log("Iniciando upload via WebDAV...", "SYNC")
     
     # Verificar se arquivo existe
     if not Path(FILE_TO_UPLOAD).exists():
@@ -87,51 +53,30 @@ def upload_file_simple(token):
     
     log(f"Tamanho do arquivo: {len(file_data)} bytes", "INFO")
     
-    # URL para upload via SharePoint Drive
-    # Formato: /sites/{site}/drives/{drive}/root:/{path}/{filename}:/content
+    # URL WebDAV do SharePoint
+    webdav_url = (
+        f"https://{SHAREPOINT_SITE}/sites/{SHAREPOINT_SITE_NAME}/_vti_bin/DavWWWRoot/"
+        f"{FOLDER_PATH}/{FILE_TO_UPLOAD}".replace(" ", "%20")
+    )
     
-    drive_url = f"https://graph.microsoft.com/v1.0/sites/{SHAREPOINT_SITE}:/sites/{SHAREPOINT_SITE_NAME}/drives"
+    # Credenciais em Base64
+    credentials = base64.b64encode(f"{EMAIL}:{APP_PASSWORD}".encode()).decode()
     
     headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json'
+        'Authorization': f'Basic {credentials}',
+        'Content-Type': 'text/html'
     }
     
     try:
-        log("Procurando drive...", "INFO")
-        drive_response = requests.get(drive_url, headers=headers, timeout=10)
-        
-        if drive_response.status_code != 200:
-            log(f"Erro ao buscar drive: {drive_response.text}", "ERROR")
-            return False
-        
-        drives = drive_response.json().get('value', [])
-        if not drives:
-            log("Nenhum drive encontrado", "ERROR")
-            return False
-        
-        drive_id = drives[0]['id']
-        log(f"Drive encontrado: {drive_id}", "SUCCESS")
-        
-        # Fazer upload
-        upload_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{FOLDER_PATH}/{FILE_TO_UPLOAD}:/content"
-        
-        upload_headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'text/html'
-        }
-        
         log(f"Enviando para: {FOLDER_PATH}/{FILE_TO_UPLOAD}", "INFO")
-        upload_response = requests.put(upload_url, headers=upload_headers, data=file_data, timeout=30)
+        response = requests.put(webdav_url, headers=headers, data=file_data, timeout=30)
         
-        if upload_response.status_code in [200, 201]:
+        if response.status_code in [200, 201, 204]:
             log("Arquivo enviado com sucesso!", "SUCCESS")
-            result = upload_response.json()
-            log(f"ID do arquivo: {result.get('id')}", "INFO")
             return True
         else:
-            log(f"Erro no upload: {upload_response.status_code}", "ERROR")
-            log(f"Resposta: {upload_response.text[:500]}", "ERROR")
+            log(f"Erro no upload: {response.status_code}", "ERROR")
+            log(f"Resposta: {response.text[:200]}", "ERROR")
             return False
             
     except requests.exceptions.RequestException as e:
@@ -144,25 +89,19 @@ def upload_file_simple(token):
 
 def main():
     print("=" * 70)
-    log("Sincronizador: GitHub → SharePoint (Microsoft Graph)", "SYNC")
+    log("Sincronizador: GitHub → SharePoint (WebDAV)", "SYNC")
     print("=" * 70)
     
     # Validar variáveis de ambiente
-    if not EMAIL or not PASSWORD:
+    if not EMAIL or not APP_PASSWORD:
         log("Variáveis de ambiente não configuradas!", "ERROR")
-        log("Configure: SHAREPOINT_EMAIL e SHAREPOINT_PASSWORD", "ERROR")
+        log("Configure: SHAREPOINT_EMAIL e SHAREPOINT_APP_PASSWORD", "ERROR")
         return False
     
     log(f"Email: {EMAIL}", "INFO")
     
-    # Autenticar
-    token = get_access_token()
-    if not token:
-        log("Falha na autenticação", "ERROR")
-        return False
-    
     # Upload
-    success = upload_file_simple(token)
+    success = upload_via_webdav()
     
     print("=" * 70)
     if success:
